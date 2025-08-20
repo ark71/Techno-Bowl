@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFL Football Field - Dynamic Kickoff</title>
+    <style>
+        /* * CSS Variables for easy customization and maintaining proportions.
+         * The aspect ratio is based on the official NFL dimensions: 120 yards (360ft) by 53.33 yards (160ft).
+        */
+        :root {
+            --line-thickness: 1.5px; /* Represents 4-inch lines */
+            --goal-line-thickness: 3px; /* Represents 8-inch lines */
+            --turf-color: #006A4E;
+            --sideline-turf-color: #00523B;
+            --chiefs-yellow: #FFB612;
+            --chiefs-red: #E31837;
+            --bucs-red: #D50A0A;
+            --bucs-pewter: #343434;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+            box-sizing: border-box;
+            font-family: 'Helvetica', 'Arial', sans-serif;
+        }
+        
+        /* New container for the whole scene */
+        .stadium-view {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 95vw;
+            max-width: 1400px;
+        }
+
+        .zoom-container {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: transform 1s ease-in-out; /* For touchdown zoom */
+        }
+
+        .controls {
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1rem;
+            position: relative;
+            z-index: 100;
+        }
+
+        .controls button {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            font-weight: bold;
+            color: white;
+            background-color: #444;
+            border: 2px solid #666;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .controls button:hover {
+            background-color: #555;
+        }
+        .controls button:disabled {
+            background-color: #222;
+            color: #555;
+            cursor: not-allowed;
+        }
+
+        /* Scoreboard Styles */
+        .scoreboard-container {
+            width: 100%;
+            background-color: #111;
+            color: white;
+            padding: 0.5rem;
+            margin-bottom: 1rem;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+        }
+        .team-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex: 1;
+        }
+        .team-info.away {
+            justify-content: flex-end;
+        }
+        .team-name {
+            font-size: 1.5vw;
+        }
+        .team-score {
+            font-size: 2.5vw;
+            background-color: #000;
+            padding: 0.2rem 0.8rem;
+            border-radius: 5px;
+            color: #FFC20E;
+        }
+        .game-info {
+            flex: 0.8;
+            text-align: center;
+        }
+        .game-clock {
+            font-size: 2.5vw;
+            color: #FFC20E;
+        }
+        .game-details {
+            font-size: 1.2vw;
+            display: flex;
+            justify-content: space-around;
+        }
+
+
+        /* Kick Meter Styles */
+        .kick-meter-container {
+            position: absolute;
+            bottom: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 30%;
+            height: 20px;
+            background-color: rgba(0,0,0,0.5);
+            border: 2px solid white;
+            border-radius: 10px;
+            z-index: 20;
+            display: none; /* Hidden by default */
+        }
+        .kick-meter-bar {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to right, #4CAF50, #FFEB3B, #F44336);
+            border-radius: 8px;
+        }
+        .kick-meter-indicator {
+            position: absolute;
+            top: -5px;
+            width: 4px;
+            height: 30px;
+            background-color: white;
+            left: 0%;
+        }
+        .kick-meter-container.active {
+            display: block;
+        }
+        @keyframes slide {
+            0% { left: 0%; }
+            50% { left: 100%; }
+            100% { left: 0%; }
+        }
+        .kick-meter-indicator.moving {
+            animation: slide 1.5s linear infinite;
+        }
+
+        .instructions {
+            color: white;
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            text-shadow: 1px 1px 2px black;
+        }
+
+
+        .field-wrapper {
+            width: 100%;
+            background-color: white;
+            aspect-ratio: 372 / 172; /* (360ft field + 6ft border*2) / (160ft field + 6ft border*2) */
+            padding: 1.6129%; /* 6ft border on each side relative to 372ft total width (6/372) */
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+        }
+
+        .field-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: var(--turf-color);
+            background-image: 
+                linear-gradient(45deg, rgba(0,0,0,0.1) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.1) 75%, rgba(0,0,0,0.1)),
+                linear-gradient(45deg, rgba(0,0,0,0.1) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.1) 75%, rgba(0,0,0,0.1));
+            background-size: 1px 1px;
+            background-position: 0 0, 0.5px 0.5px;
+            display: flex;
+            container-type: inline-size;
+        }
+
+        /* Sideline Area Styling */
+        .sideline {
+            width: 100%;
+            height: 10vh;
+            background-color: var(--sideline-turf-color);
+            position: relative;
+            box-shadow: inset 0 5px 10px rgba(0,0,0,0.4);
+        }
+        .sideline.bottom {
+            box-shadow: inset 0 -5px 10px rgba(0,0,0,0.4);
+        }
+        .sideline-players {
+            position: absolute;
+            top:0; left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .bench {
+            position: absolute;
+            width: 30%; /* Bench spans between the 35 yard lines */
+            height: 15%;
+            background-color: #A5ACAF;
+            border: 2px solid #343434;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1;
+        }
+
+
+        /* End Zones Styling */
+        .end-zone {
+            width: 8.333%; /* 30ft / 360ft */
+            height: 100%;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .end-zone-content {
+            display: flex;
+            align-items: center;
+            gap: 1.5cqw;
+            position: absolute;
+        }
+        .end-zone.left .end-zone-content { transform: rotate(-90deg); }
+        .end-zone.right .end-zone-content { transform: rotate(90deg); }
+
+        .end-zone-text {
+            font-size: 4cqw;
+            font-weight: 900;
+            font-family: 'Arial Black', sans-serif;
+            text-transform: uppercase;
+            white-space: nowrap;
+            text-shadow: 0 0 5px rgba(0,0,0,0.5);
+        }
+        
+        .end-zone-logo {
+            height: 4cqw;
+            width: auto;
+        }
+
+        /* Main Playing Field Area */
+        .playing-field {
+            width: 83.333%; /* 300ft / 360ft */
+            height: 100%;
+            position: relative;
+        }
+
+        .midfield-logo {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 12%;
+            height: auto;
+            opacity: 0.9;
+            z-index: 1; 
+        }
+        
+        /* Yard Lines (every 5 yards) */
+        .yard-line {
+            position: absolute;
+            height: 100%;
+            background-color: white;
+            width: var(--line-thickness);
+        }
+        
+        .goal-line {
+            position: absolute;
+            height: 100%;
+            background-color: white;
+            width: var(--goal-line-thickness);
+        }
+        .goal-line.left { left: 0; }
+        .goal-line.right { right: 0; }
+
+        .hash-marks-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+        }
+
+        .hash-mark {
+            position: absolute;
+            background-color: white;
+            width: var(--line-thickness);
+        }
+        
+        .hash-mark.sideline {
+             height: 1.25%; /* 2ft / 160ft */
+        }
+        .hash-mark.sideline.top { top: 0; }
+        .hash-mark.sideline.bottom { bottom: 0; }
+        
+        .hash-mark.inbound {
+            height: 1.875%; /* 3ft / 160ft */
+        }
+        .hash-mark.inbound.top { top: 44.2%; transform: translateY(-50%); }
+        .hash-mark.inbound.bottom { bottom: 44.2%; transform: translateY(50%); }
+
+        .try-line {
+            position: absolute;
+            background-color: white;
+            width: var(--line-thickness);
+            height: 1.875%; /* 1 yard long */
+        }
+        .try-line.left { left: 2%; } /* 2 yards from goal line */
+        .try-line.right { right: 2%; }
+        .try-line.top { top: 44.2%; transform: translateY(-50%); }
+        .try-line.bottom { bottom: 44.2%; transform: translateY(50%); }
+
+
+        .marker-container {
+            position: absolute;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.2cqw;
+            width: 6cqw;
+        }
+
+        .marker-container.number-top { 
+            top: 22.5%; 
+            transform: translateX(-50%) translateY(-50%);
+        }
+        .marker-container.number-bottom { 
+            bottom: 22.5%; 
+            transform: translateX(-50%) translateY(50%) rotate(180deg); 
+        }
+
+        .yard-number {
+            color: white;
+            font-size: 2cqw;
+            font-weight: 900;
+            line-height: 1;
+        }
+        
+        .marker-container.number-top .yard-number {
+            transform: rotate(180deg);
+        }
+        .marker-container.number-bottom .yard-number { 
+            transform: rotate(180deg); 
+        }
+        
+        .arrow {
+            width: 0;
+            height: 0;
+            border-top: 0.4cqw solid transparent;
+            border-bottom: 0.4cqw solid transparent;
+        }
+
+        .arrow.arrow-left { border-right: 0.45cqw solid white; }
+        .arrow.arrow-right { border-left: 0.45cqw solid white; }
+        
+        .player-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            z-index: 10;
+        }
+        .player {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 1.2vw;
+            height: 1.9vw;
+            max-width: 14px;
+            max-height: 22px;
+            min-width: 6px;
+            min-height: 10px;
+            z-index: 2; /* Ensure players are on top of the bench */
+        }
+
+        .player svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));
+        }
+
+        .player .helmet {
+            stroke: #333;
+            stroke-width: 0.5;
+        }
+        .player .jersey {
+            stroke: #222;
+            stroke-width: 0.5;
+        }
+        
+        .player.controlled svg {
+            filter: drop-shadow(0 0 5px yellow);
+        }
+
+        /* Football Style */
+        .football {
+            position: absolute;
+            width: 1.2%;
+            height: 2%;
+            background-color: #6F4E37; /* Football brown */
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scaleX(1.5); /* Make it oval */
+            border: 1px solid black;
+            z-index: 11; /* Above the players */
+        }
+        .football-shadow {
+            position: absolute;
+            width: 1.5%;
+            height: 2.5%;
+            background-color: rgba(0,0,0,0.3);
+            border-radius: 50%;
+            transform: translate(-50%, -50%) scaleX(1.5);
+            z-index: 9; /* Below players but above field */
+        }
+
+        /* Kickoff Zone Overlays */
+        .kickoff-zone {
+            position: absolute;
+            height: 100%;
+            z-index: 0;
+            opacity: 0.2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2cqw;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+            font-weight: bold;
+        }
+        .setup-zone {
+            background-color: #FFC20E; /* Yellow */
+            left: 65%; /* From B35 */
+            width: 5%;  /* To B30 */
+        }
+        .landing-zone {
+            background-color: #3B99FC; /* Blue */
+            left: 80%; /* From B20 */
+            width: 20%; /* To Goal Line */
+        }
+
+        /* Touchdown Celebration */
+        @keyframes celebrate {
+            0%, 100% { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+            50% { transform: translate(-50%, -60%) rotate(0deg) scale(1.1); }
+        }
+        .celebrating {
+            animation: celebrate 0.4s ease-in-out 3;
+        }
+        @keyframes spike-and-bounce {
+            0% { top: var(--player-top); transform: translate(-50%, -50%) scaleX(1.5); }
+            30% { top: calc(var(--player-top) + 4%); transform: translate(-50%, -50%) scaleX(1.5) rotate(90deg); }
+            60% { top: calc(var(--player-top) + 2%); transform: translate(-50%, -50%) scaleX(1.2) rotate(180deg); }
+            100% { top: calc(var(--player-top) + 4%); transform: translate(-50%, -50%) scaleX(1.5) rotate(270deg); }
+        }
+        .spiking {
+            animation: spike-and-bounce 0.8s ease-out forwards;
+        }
+        
+    </style>
+</head>
+<body>
+
+<div class="stadium-view">
+    <div class="scoreboard-container">
+        <div class="team-info home">
+            <div class="team-name" id="home-name">CHIEFS</div>
+            <div class="team-score" id="home-score">0</div>
+        </div>
+        <div class="game-info">
+            <div class="game-clock" id="game-clock">15:00</div>
+            <div class="game-details">
+                <span id="quarter">1st</span>
+                <span id="down-and-distance">1st & 10</span>
+            </div>
+        </div>
+        <div class="team-info away">
+            <div class="team-score" id="away-score">0</div>
+            <div class="team-name" id="away-name">BUCS</div>
+        </div>
+    </div>
+    <div class="controls">
+        <div id="instructions" class="instructions">Press SPACEBAR to Kick</div>
+        <button id="reset-btn">Reset</button>
+    </div>
+    <div class="zoom-container">
+        <div class="sideline top">
+            <div class="bench"></div>
+            <div class="player-container sideline-players"></div>
+        </div>
+        <div class="field-wrapper">
+            <div class="field-container">
+                <!-- Left End Zone -->
+                <div class="end-zone left" id="left-endzone">
+                    <div class="end-zone-content">
+                        <img src="https://upload.wikimedia.org/wikipedia/en/thumb/e/e1/Kansas_City_Chiefs_logo.svg/1200px-Kansas_City_Chiefs_logo.svg.png" alt="Chiefs Logo" class="end-zone-logo" id="left-logo">
+                        <div class="end-zone-text" id="left-text">CHIEFS</div>
+                    </div>
+                </div>
+
+                <!-- Playing Field -->
+                <div class="playing-field">
+                    <div class="goal-line left"></div>
+                    <div class="goal-line right"></div>
+                    <img src="https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/National_Football_League_logo.svg/1200px-National_Football_League_logo.svg.png" 
+                         alt="NFL Logo" 
+                         class="midfield-logo"
+                         onerror="this.style.display='none'">
+                    
+                    <!-- Zone Overlays -->
+                    <div class="kickoff-zone setup-zone"></div>
+                    <div class="kickoff-zone landing-zone"></div>
+
+                    <div class="hash-marks-container"></div>
+                    <!-- Try Lines -->
+                    <div class="try-line left top"></div>
+                    <div class="try-line left bottom"></div>
+                    <div class="try-line right top"></div>
+                    <div class="try-line right bottom"></div>
+
+                    <!-- Player Container -->
+                    <div class="player-container on-field-players"></div>
+                    
+                    <div class="kick-meter-container">
+                        <div class="kick-meter-bar"></div>
+                        <div class="kick-meter-indicator"></div>
+                    </div>
+                </div>
+
+                <!-- Right End Zone -->
+                <div class="end-zone right" id="right-endzone">
+                    <div class="end-zone-content">
+                        <img src="https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Tampa_Bay_Buccaneers_logo.svg/1200px-Tampa_Bay_Buccaneers_logo.svg.png" alt="Buccaneers Logo" class="end-zone-logo" id="right-logo">
+                        <div class="end-zone-text" id="right-text">BUCCANEERS</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="sideline bottom">
+            <div class="bench"></div>
+            <div class="player-container sideline-players"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const playingField = document.querySelector('.playing-field');
+    const hashMarksContainer = document.querySelector('.hash-marks-container');
+    const onFieldPlayerContainer = document.querySelector('.on-field-players');
+    const topSidelineContainer = document.querySelector('.sideline.top .player-container');
+    const bottomSidelineContainer = document.querySelector('.sideline.bottom .player-container');
+    const resetBtn = document.getElementById('reset-btn');
+    const zoomContainer = document.querySelector('.zoom-container');
+    const instructions = document.getElementById('instructions');
+    const kickMeterContainer = document.querySelector('.kick-meter-container');
+    const kickMeterIndicator = document.querySelector('.kick-meter-indicator');
+    const homeNameEl = document.getElementById('home-name');
+    const awayNameEl = document.getElementById('away-name');
+    const homeScoreEl = document.getElementById('home-score');
+    const awayScoreEl = document.getElementById('away-score');
+    const clockEl = document.getElementById('game-clock');
+    const downEl = document.getElementById('down-and-distance');
+    
+    let animationFrameId;
+    let players = [];
+    let football = {};
+    let gameState = 'waiting'; // 'waiting', 'meterActive', 'ballInAir', 'returnActive', 'playOver'
+    let ballCarrier = null;
+    let controlledPlayer = null;
+    let gameClockSeconds = 15 * 60;
+    let clockInterval;
+
+    const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+    const TEAMS = {
+        chiefs: {
+            name: 'CHIEFS',
+            className: 'chiefs',
+            colors: { main: 'var(--chiefs-red)', accent: 'var(--chiefs-yellow)', helmet: 'var(--chiefs-red)', jersey: 'white' },
+            logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/e/e1/Kansas_City_Chiefs_logo.svg/1200px-Kansas_City_Chiefs_logo.svg.png',
+            score: 0
+        },
+        bucs: {
+            name: 'BUCCANEERS',
+            className: 'bucs',
+            colors: { main: 'var(--bucs-red)', accent: 'var(--bucs-pewter)', helmet: 'var(--bucs-pewter)', jersey: 'white' },
+            logo: 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a2/Tampa_Bay_Buccaneers_logo.svg/1200px-Tampa_Bay_Buccaneers_logo.svg.png',
+            score: 0
+        }
+    };
+
+    let homeTeam = TEAMS.chiefs;
+    let awayTeam = TEAMS.bucs;
+    let kickingTeam = homeTeam;
+    let receivingTeam = awayTeam;
+
+    function updateScoreboard() {
+        homeNameEl.textContent = homeTeam.name;
+        awayNameEl.textContent = awayTeam.name;
+        homeScoreEl.textContent = homeTeam.score;
+        awayScoreEl.textContent = awayTeam.score;
+        const minutes = Math.floor(gameClockSeconds / 60);
+        const seconds = gameClockSeconds % 60;
+        clockEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    function updateEndzones() {
+        const leftEndzone = document.getElementById('left-endzone');
+        const leftLogo = document.getElementById('left-logo');
+        const leftText = document.getElementById('left-text');
+        const rightEndzone = document.getElementById('right-endzone');
+        const rightLogo = document.getElementById('right-logo');
+        const rightText = document.getElementById('right-text');
+
+        if (homeTeam.name === 'CHIEFS') {
+            leftEndzone.style.backgroundColor = homeTeam.colors.accent;
+            leftText.style.color = homeTeam.colors.main;
+        } else {
+            leftEndzone.style.backgroundColor = homeTeam.colors.main;
+            leftText.style.color = 'white';
+        }
+        leftText.textContent = homeTeam.name;
+        leftLogo.src = homeTeam.logo;
+        
+        if (awayTeam.name === 'CHIEFS') {
+            rightEndzone.style.backgroundColor = awayTeam.colors.accent;
+            rightText.style.color = awayTeam.colors.main;
+        } else {
+            rightEndzone.style.backgroundColor = awayTeam.colors.main;
+            rightText.style.color = 'white';
+        }
+        rightText.textContent = awayTeam.name;
+        rightLogo.src = awayTeam.logo;
+    }
+
+    function setupPlayers() {
+        onFieldPlayerContainer.innerHTML = '';
+        players = [];
+        
+        const createPlayer = (team, left, top, id) => {
+            const playerEl = document.createElement('div');
+            playerEl.className = `player ${team.className}`;
+            playerEl.id = id;
+            playerEl.style.left = `${left}%`;
+            playerEl.style.top = `${top}%`;
+            playerEl.innerHTML = `<svg viewBox="0 0 20 25"><g><circle class="helmet" cx="10" cy="7" r="6" fill="${team.colors.helmet}" /><rect class="jersey" x="2" y="12" width="16" height="12" rx="4" fill="${team.colors.jersey}" /></g></svg>`;
+            onFieldPlayerContainer.appendChild(playerEl);
+            players.push({ el: playerEl, x: left, y: top, vx: 0, vy: 0, team: team.className, id });
+        };
+        
+        const footballEl = document.createElement('div');
+        footballEl.className = 'football';
+        footballEl.style.left = '35%';
+        footballEl.style.top = '50.5%';
+        onFieldPlayerContainer.appendChild(footballEl);
+
+        const shadowEl = document.createElement('div');
+        shadowEl.className = 'football-shadow';
+        shadowEl.style.left = '35%';
+        shadowEl.style.top = '50.5%';
+        onFieldPlayerContainer.appendChild(shadowEl);
+
+        football = { el: footballEl, shadowEl: shadowEl, x: 35, y: 50.5, z: 0, vx: 0, vy: 0, vz: 0, onGround: false };
+
+        createPlayer(kickingTeam, 30, 50, 'kicker');
+        for (let i = 1; i <= 10; i++) {
+            const spacing = 100 / 11;
+            createPlayer(kickingTeam, 60, spacing * i, `kicker-${i}`);
+        }
+
+        createPlayer(receivingTeam, 65, 18, 'receiver-1');
+        createPlayer(receivingTeam, 65, 28, 'receiver-2');
+        createPlayer(receivingTeam, 65, 38, 'receiver-3');
+        createPlayer(receivingTeam, 65, 50, 'receiver-4');
+        createPlayer(receivingTeam, 65, 62, 'receiver-5');
+        createPlayer(receivingTeam, 65, 72, 'receiver-6');
+        createPlayer(receivingTeam, 65, 82, 'receiver-7');
+        createPlayer(receivingTeam, 68, 30, 'receiver-8');
+        createPlayer(receivingTeam, 68, 70, 'receiver-9');
+        createPlayer(receivingTeam, 85, 35, 'returner-1');
+        createPlayer(receivingTeam, 90, 65, 'returner-2');
+
+        topSidelineContainer.innerHTML = '';
+        bottomSidelineContainer.innerHTML = '';
+        for (let i = 0; i < 42; i++) {
+            const playerDivTop = document.createElement('div');
+            playerDivTop.className = `player ${homeTeam.className}`;
+            playerDivTop.style.left = `${Math.random() * 30 + 35}%`;
+            playerDivTop.style.top = `${Math.random() * 10 + 45}%`;
+            playerDivTop.innerHTML = `<svg viewBox="0 0 20 25"><g><circle class="helmet" cx="10" cy="7" r="6" fill="${homeTeam.colors.helmet}"/><rect class="jersey" x="2" y="12" width="16" height="12" rx="4" fill="${homeTeam.colors.jersey}"/></g></svg>`;
+            topSidelineContainer.appendChild(playerDivTop);
+
+            const playerDivBottom = document.createElement('div');
+            playerDivBottom.className = `player ${awayTeam.className}`;
+            playerDivBottom.style.left = `${Math.random() * 30 + 35}%`;
+            playerDivBottom.style.top = `${Math.random() * 10 + 45}%`;
+            playerDivBottom.innerHTML = `<svg viewBox="0 0 20 25"><g><circle class="helmet" cx="10" cy="7" r="6" fill="${awayTeam.colors.helmet}"/><rect class="jersey" x="2" y="12" width="16" height="12" rx="4" fill="${awayTeam.colors.jersey}"/></g></svg>`;
+            bottomSidelineContainer.appendChild(playerDivBottom);
+        }
+    }
+
+    function gameLoop() {
+        const playerSpeed = 0.25;
+
+        if (gameState === 'kickerApproach') {
+            const kicker = players.find(p => p.id === 'kicker');
+            if (kicker.x < 34.5) {
+                kicker.x += 0.2;
+            } else {
+                kicker.x = 34.5;
+                gameState = 'meterActive';
+                instructions.textContent = 'Press SPACEBAR to Set Power';
+                kickMeterContainer.classList.add('active');
+                kickMeterIndicator.classList.add('moving');
+            }
+        }
+
+        if (gameState === 'ballInAir' || gameState === 'returnActive') {
+             if (gameState === 'ballInAir') {
+                const flightTime = 2000;
+                const progress = (Date.now() - football.kickTime) / flightTime;
+
+                if (progress >= 1) {
+                    football.x = football.targetX;
+                    football.y = football.targetY;
+                    football.z = 0;
+                    football.onGround = true;
+                    football.shadowEl.style.display = 'none';
+                    gameState = 'returnActive';
+                    instructions.textContent = 'Use Arrow Keys to Get the Ball!';
+                } else {
+                    const easeInOutQuad = t => t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+                    const easedProgress = easeInOutQuad(progress);
+                    football.x = football.startX + (football.targetX - football.startX) * easedProgress;
+                    football.y = football.startY + (football.targetY - football.startY) * easedProgress;
+                    const arc = -4 * 1.8 * (progress - progress * progress);
+                    football.z = arc;
+                }
+                football.el.style.transform = `translate(-50%, -50%) scaleX(1.5) scale(${1 + football.z})`;
+                football.shadowEl.style.transform = `translate(-50%, -50%) scaleX(1.5) scale(${1 + football.z * 0.2})`;
+            }
+
+            if (gameState === 'returnActive') {
+                if (!ballCarrier) {
+                    let closestBuc = null;
+                    let minDistance = Infinity;
+                    players.filter(p => p.team === receivingTeam.className).forEach(p => {
+                        const dx = p.x - football.x;
+                        const dy = p.y - football.y;
+                        const distance = Math.sqrt(dx*dx + dy*dy);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            closestBuc = p;
+                        }
+                    });
+                    if(controlledPlayer && controlledPlayer.el) controlledPlayer.el.classList.remove('controlled');
+                    controlledPlayer = closestBuc;
+                    if(controlledPlayer && controlledPlayer.el) controlledPlayer.el.classList.add('controlled');
+                }
+
+                if (keys.ArrowUp) controlledPlayer.y -= playerSpeed;
+                if (keys.ArrowDown) controlledPlayer.y += playerSpeed;
+                if (keys.ArrowLeft) controlledPlayer.x -= playerSpeed;
+                if (keys.ArrowRight) controlledPlayer.x += playerSpeed;
+
+                controlledPlayer.x = Math.max(-8, Math.min(108, controlledPlayer.x));
+                controlledPlayer.y = Math.max(2, Math.min(98, controlledPlayer.y));
+                
+                players.forEach(p => {
+                    if (p === controlledPlayer) return;
+                    const target = ballCarrier || football;
+                    if (p.team === kickingTeam.className) {
+                        const angle = Math.atan2(target.y - p.y, target.x - p.x);
+                        p.vx = Math.cos(angle) * (playerSpeed * 0.9);
+                        p.vy = Math.sin(angle) * (playerSpeed * 0.9);
+                    } else if (p.team === receivingTeam.className) {
+                        const targetX = target.x - 5 - (Math.random() * 5);
+                        const targetY = target.y + (Math.random() * 20 - 10);
+                        const angle = Math.atan2(targetY - p.y, targetX - p.x);
+                        p.vx = Math.cos(angle) * (playerSpeed * 0.85);
+                        p.vy = Math.sin(angle) * (playerSpeed * 0.85);
+                    }
+                    p.x += p.vx;
+                    p.y += p.vy;
+                });
+
+                if (!ballCarrier && football.onGround) {
+                    players.forEach(p => {
+                        const dx = p.x - football.x;
+                        const dy = p.y - football.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < 2) {
+                            if (p.team === receivingTeam.className) {
+                                ballCarrier = p;
+                                controlledPlayer = p;
+                                instructions.textContent = 'Run for the Touchdown!';
+                                football.shadowEl.style.display = 'none';
+                            } else if (p.team === kickingTeam.className) {
+                                gameState = 'playOver';
+                                resetBtn.disabled = false;
+                                football.shadowEl.style.display = 'none';
+                            }
+                        }
+                    });
+                }
+
+                if (ballCarrier) {
+                    football.x = ballCarrier.x;
+                    football.y = ballCarrier.y;
+                    if (ballCarrier.x <= -4) {
+                        gameState = 'playOver';
+                        triggerTouchdown(ballCarrier);
+                        cancelAnimationFrame(animationFrameId);
+                        return;
+                    }
+                    const defenders = players.filter(p => p.team === kickingTeam.className);
+                    for (const defender of defenders) {
+                        const dx = ballCarrier.x - defender.x;
+                        const dy = ballCarrier.y - defender.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < 2) {
+                            gameState = 'playOver';
+                            resetBtn.disabled = false;
+                            cancelAnimationFrame(animationFrameId);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        players.forEach(p => { p.el.style.left = `${p.x}%`; p.el.style.top = `${p.y}%`; });
+        football.el.style.left = `${football.x}%`;
+        football.el.style.top = `${football.y}%`;
+        football.shadowEl.style.left = `${football.x}%`;
+        football.shadowEl.style.top = `${football.y}%`;
+
+
+        animationFrameId = requestAnimationFrame(gameLoop);
+    }
+
+    function triggerTouchdown(returner) {
+        if (returner.team === homeTeam.className) {
+            homeTeam.score += 7;
+        } else {
+            awayTeam.score += 7;
+        }
+        updateScoreboard();
+
+        const returnerEl = returner.el;
+        const zoomTarget = document.querySelector('.zoom-container');
+        const playerRect = returnerEl.getBoundingClientRect();
+        const zoomRect = zoomTarget.getBoundingClientRect();
+        const originX = ((playerRect.left + playerRect.width / 2) - zoomRect.left) / zoomRect.width * 100;
+        const originY = ((playerRect.top + playerRect.height / 2) - zoomRect.top) / zoomRect.height * 100;
+        zoomTarget.style.transformOrigin = `${originX}% ${originY}%`;
+        zoomTarget.style.transform = 'scale(3)';
+        returnerEl.classList.add('celebrating');
+
+        const footballEl = document.querySelector('.football');
+        footballEl.style.setProperty('--player-top', `${returner.y}%`);
+        footballEl.classList.add('spiking');
+
+        setTimeout(() => {
+            prepareForNextKickoff();
+        }, 3000);
+    }
+
+    function prepareForNextKickoff() {
+        const temp = homeTeam;
+        homeTeam = awayTeam;
+        awayTeam = temp;
+        
+        const tempKick = kickingTeam;
+        kickingTeam = receivingTeam;
+        receivingTeam = tempKick;
+
+        updateEndzones();
+        updateScoreboard();
+
+        resetBtn.click();
+    }
+
+
+    function handleKickoff() {
+        const meterPosition = parseFloat(window.getComputedStyle(kickMeterIndicator).left);
+        const kickPower = meterPosition / kickMeterContainer.offsetWidth;
+        
+        const kickYards = kickPower * 70;
+        const ballLandingLeft = 35 + kickYards; 
+        const ballLandingTop = Math.random() * 60 + 20;
+
+        football.startX = football.x;
+        football.startY = football.y;
+        football.targetX = ballLandingLeft;
+        football.targetY = ballLandingTop;
+        football.kickTime = Date.now();
+    }
+
+    resetBtn.addEventListener('click', () => {
+        cancelAnimationFrame(animationFrameId);
+        zoomContainer.style.transform = 'scale(1)';
+        setupPlayers();
+        resetBtn.disabled = false;
+        instructions.textContent = 'Press SPACEBAR to Kick';
+        gameState = 'waiting';
+        ballCarrier = null;
+        controlledPlayer = null;
+        kickMeterIndicator.style.animationPlayState = 'running';
+        kickMeterIndicator.classList.remove('moving');
+        kickMeterContainer.classList.remove('active');
+        if(clockInterval) clearInterval(clockInterval);
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+            e.preventDefault();
+            if (gameState === 'waiting') {
+                gameState = 'kickerApproach';
+                gameLoop();
+            } else if (gameState === 'meterActive') {
+                gameState = 'ballInAir';
+                instructions.textContent = '';
+                kickMeterIndicator.style.animationPlayState = 'paused';
+                handleKickoff();
+            }
+        }
+        if (keys.hasOwnProperty(e.key)) {
+            e.preventDefault();
+            keys[e.key] = true;
+        }
+    });
+    window.addEventListener('keyup', (e) => {
+        if (keys.hasOwnProperty(e.key)) {
+            e.preventDefault();
+            keys[e.key] = false;
+        }
+    });
+
+    // --- Field Markings Generation ---
+    for (let i = 1; i < 100; i++) {
+        if (i % 5 === 0) {
+            const line = document.createElement('div');
+            line.className = 'yard-line';
+            line.style.left = `${i}%`;
+            playingField.appendChild(line);
+
+            if (i % 10 === 0 && i !== 50) {
+                const yardValue = i < 50 ? i : 100 - i;
+                
+                const topContainer = document.createElement('div');
+                topContainer.className = 'marker-container number-top';
+                topContainer.style.left = `${i}%`;
+                const numTop = document.createElement('div');
+                numTop.className = 'yard-number';
+                numTop.textContent = yardValue;
+                const arrowLeftTop = document.createElement('div');
+                arrowLeftTop.className = 'arrow arrow-left';
+                 const arrowRightTop = document.createElement('div');
+                arrowRightTop.className = 'arrow arrow-right';
+                
+                if (i < 50) arrowRightTop.style.visibility = 'hidden';
+                else arrowLeftTop.style.visibility = 'hidden';
+                
+                topContainer.appendChild(arrowLeftTop);
+                topContainer.appendChild(numTop);
+                topContainer.appendChild(arrowRightTop);
+                playingField.appendChild(topContainer);
+
+                const bottomContainer = document.createElement('div');
+                bottomContainer.className = 'marker-container number-bottom';
+                bottomContainer.style.left = `${i}%`;
+                const numBottom = document.createElement('div');
+                numBottom.className = 'yard-number';
+                numBottom.textContent = yardValue;
+                const arrowLeftBottom = document.createElement('div');
+                arrowLeftBottom.className = 'arrow arrow-left';
+                const arrowRightBottom = document.createElement('div');
+                arrowRightBottom.className = 'arrow arrow-right';
+
+                if (i < 50) arrowLeftBottom.style.visibility = 'hidden';
+                else arrowRightBottom.style.visibility = 'hidden';
+
+                bottomContainer.appendChild(arrowLeftBottom);
+                bottomContainer.appendChild(numBottom);
+                bottomContainer.appendChild(arrowRightBottom);
+                playingField.appendChild(bottomContainer);
+            }
+        }
+
+        const hashTop = document.createElement('div');
+        hashTop.className = 'hash-mark sideline top';
+        hashTop.style.left = `${i}%`;
+        hashMarksContainer.appendChild(hashTop);
+        
+        const hashBottom = document.createElement('div');
+        hashBottom.className = 'hash-mark sideline bottom';
+        hashBottom.style.left = `${i}%`;
+        hashMarksContainer.appendChild(hashBottom);
+        
+        const hashInboundTop = document.createElement('div');
+        hashInboundTop.className = 'hash-mark inbound top';
+        hashInboundTop.style.left = `${i}%`;
+        hashMarksContainer.appendChild(hashInboundTop);
+        
+        const hashInboundBottom = document.createElement('div');
+        hashInboundBottom.className = 'hash-mark inbound bottom';
+        hashInboundBottom.style.left = `${i}%`;
+        hashMarksContainer.appendChild(hashInboundBottom);
+    }
+
+    const fiftyTopContainer = document.createElement('div');
+    fiftyTopContainer.className = 'marker-container number-top';
+    fiftyTopContainer.style.left = '50%';
+    const fiftyNumTop = document.createElement('div');
+    fiftyNumTop.className = 'yard-number';
+    fiftyNumTop.textContent = '50';
+    fiftyTopContainer.appendChild(fiftyNumTop);
+    playingField.appendChild(fiftyTopContainer);
+
+    const fiftyBottomContainer = document.createElement('div');
+    fiftyBottomContainer.className = 'marker-container number-bottom';
+    fiftyBottomContainer.style.left = '50%';
+    const fiftyNumBottom = document.createElement('div');
+    fiftyNumBottom.className = 'yard-number';
+    fiftyNumBottom.textContent = '50';
+    fiftyBottomContainer.appendChild(fiftyNumBottom);
+    playingField.appendChild(fiftyBottomContainer);
+    
+    // Initial setup
+    TEAMS.chiefs.score = 0;
+    TEAMS.bucs.score = 0;
+    setupPlayers();
+    updateScoreboard();
+    updateEndzones();
+</script>
+</body>
+</html>
