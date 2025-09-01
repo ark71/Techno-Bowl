@@ -29,6 +29,7 @@
             padding: 1rem;
             box-sizing: border-box;
             font-family: 'Helvetica', 'Arial', sans-serif;
+            color: white;
         }
         
         /* New container for the whole scene */
@@ -38,6 +39,7 @@
             align-items: center;
             width: 95vw;
             max-width: 1400px;
+            position: relative;
         }
 
         .zoom-container {
@@ -394,6 +396,11 @@
             z-index: 2; /* Ensure players are on top of the bench */
         }
 
+        .player.fallen {
+            transform: translate(-50%, -50%) rotate(90deg);
+            transition: transform 0.3s ease-out;
+        }
+
         .player svg {
             width: 100%;
             height: 100%;
@@ -407,6 +414,12 @@
         .player .jersey {
             stroke: #222;
             stroke-width: 0.5;
+        }
+        .player .position-text {
+            font-size: 7px;
+            font-weight: bold;
+            text-anchor: middle;
+            fill: black;
         }
         
         .player.controlled svg {
@@ -476,12 +489,56 @@
         .spiking {
             animation: spike-and-bounce 0.8s ease-out forwards;
         }
+
+        /* Tackle UI */
+        #tackle-indicator {
+            position: absolute;
+            top: 45%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: yellow;
+            font-size: 3rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px black;
+            z-index: 100;
+            display: none;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+        }
+        #tackle-indicator.pulsing {
+            animation: pulse 0.1s ease-in-out;
+        }
+        
+        #tackle-power-meter {
+            display: none;
+            position: absolute;
+            top: 55%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20%;
+            height: 15px;
+            background-color: rgba(0,0,0,0.7);
+            border: 2px solid yellow;
+            border-radius: 8px;
+            z-index: 101;
+        }
+        #tackle-power-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #FFC20E;
+            border-radius: 5px;
+            transition: width 0.1s linear;
+        }
         
     </style>
 </head>
 <body>
 
 <div class="stadium-view">
+    <div id="tackle-indicator">MASH KEYS!</div>
+    <div id="tackle-power-meter"><div id="tackle-power-bar"></div></div>
     <div class="scoreboard-container">
         <div class="team-info home">
             <div class="team-name" id="home-name">CHIEFS</div>
@@ -580,15 +637,19 @@
     const awayScoreEl = document.getElementById('away-score');
     const clockEl = document.getElementById('game-clock');
     const downEl = document.getElementById('down-and-distance');
+    const tackleIndicator = document.getElementById('tackle-indicator');
+    const tacklePowerMeter = document.getElementById('tackle-power-meter');
+    const tacklePowerBar = document.getElementById('tackle-power-bar');
     
     let animationFrameId;
     let players = [];
     let football = {};
-    let gameState = 'waiting'; // 'waiting', 'meterActive', 'ballInAir', 'returnActive', 'playOver'
+    let gameState = 'waiting'; // 'waiting', 'meterActive', 'ballInAir', 'returnActive', 'playOver', 'tackle'
     let ballCarrier = null;
     let controlledPlayer = null;
     let gameClockSeconds = 15 * 60;
     let clockInterval;
+    let tackleState = { active: false, mashPower: 0, defender: null, timer: 0 };
 
     const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
 
@@ -657,15 +718,20 @@
         onFieldPlayerContainer.innerHTML = '';
         players = [];
         
-        const createPlayer = (team, left, top, id) => {
+        const createPlayer = (team, left, top, id, position) => {
             const playerEl = document.createElement('div');
             playerEl.className = `player ${team.className}`;
             playerEl.id = id;
             playerEl.style.left = `${left}%`;
             playerEl.style.top = `${top}%`;
-            playerEl.innerHTML = `<svg viewBox="0 0 20 25"><g><circle class="helmet" cx="10" cy="7" r="6" fill="${team.colors.helmet}" /><rect class="jersey" x="2" y="12" width="16" height="12" rx="4" fill="${team.colors.jersey}" /></g></svg>`;
+            playerEl.innerHTML = `<svg viewBox="0 0 20 25"><g><circle class="helmet" cx="10" cy="7" r="6" fill="${team.colors.helmet}" /><rect class="jersey" x="2" y="12" width="16" height="12" rx="4" fill="${team.colors.jersey}" /><text x="10" y="20" class="position-text">${position}</text></g></svg>`;
             onFieldPlayerContainer.appendChild(playerEl);
-            players.push({ el: playerEl, x: left, y: top, vx: 0, vy: 0, team: team.className, id });
+            players.push({ el: playerEl, x: left, y: top, startX: left, startY: top, vx: 0, vy: 0, team: team.className, id, isBlocked: false, blockTimer: 0, blockingTarget: null, isFallen: false, fallTimer: 0, attributes: {
+                Strength: Math.floor(Math.random() * 50 + 50),
+                Agility: Math.floor(Math.random() * 50 + 50),
+                Tackle: Math.floor(Math.random() * 50 + 50),
+                Speed: Math.floor(Math.random() * 50 + 50)
+            }});
         };
         
         const footballEl = document.createElement('div');
@@ -682,23 +748,23 @@
 
         football = { el: footballEl, shadowEl: shadowEl, x: 35, y: 50.5, z: 0, vx: 0, vy: 0, vz: 0, onGround: false };
 
-        createPlayer(kickingTeam, 30, 50, 'kicker');
+        createPlayer(kickingTeam, 30, 50, 'kicker', 'K');
         for (let i = 1; i <= 10; i++) {
             const spacing = 100 / 11;
-            createPlayer(kickingTeam, 60, spacing * i, `kicker-${i}`);
+            createPlayer(kickingTeam, 60, spacing * i, `kicker-${i}`, 'ST');
         }
 
-        createPlayer(receivingTeam, 65, 18, 'receiver-1');
-        createPlayer(receivingTeam, 65, 28, 'receiver-2');
-        createPlayer(receivingTeam, 65, 38, 'receiver-3');
-        createPlayer(receivingTeam, 65, 50, 'receiver-4');
-        createPlayer(receivingTeam, 65, 62, 'receiver-5');
-        createPlayer(receivingTeam, 65, 72, 'receiver-6');
-        createPlayer(receivingTeam, 65, 82, 'receiver-7');
-        createPlayer(receivingTeam, 68, 30, 'receiver-8');
-        createPlayer(receivingTeam, 68, 70, 'receiver-9');
-        createPlayer(receivingTeam, 85, 35, 'returner-1');
-        createPlayer(receivingTeam, 90, 65, 'returner-2');
+        createPlayer(receivingTeam, 65, 18, 'receiver-1', 'WR');
+        createPlayer(receivingTeam, 65, 28, 'receiver-2', 'WR');
+        createPlayer(receivingTeam, 65, 38, 'receiver-3', 'TE');
+        createPlayer(receivingTeam, 65, 50, 'receiver-4', 'RB');
+        createPlayer(receivingTeam, 65, 62, 'receiver-5', 'TE');
+        createPlayer(receivingTeam, 65, 72, 'receiver-6', 'WR');
+        createPlayer(receivingTeam, 65, 82, 'receiver-7', 'WR');
+        createPlayer(receivingTeam, 68, 30, 'receiver-8', 'FB');
+        createPlayer(receivingTeam, 68, 70, 'receiver-9', 'FB');
+        createPlayer(receivingTeam, 85, 35, 'returner-1', 'KR');
+        createPlayer(receivingTeam, 90, 65, 'returner-2', 'KR');
 
         topSidelineContainer.innerHTML = '';
         bottomSidelineContainer.innerHTML = '';
@@ -720,7 +786,7 @@
     }
 
     function gameLoop() {
-        const playerSpeed = 0.25;
+        const playerSpeed = 0.15; // Slowed down game play
 
         if (gameState === 'kickerApproach') {
             const kicker = players.find(p => p.id === 'kicker');
@@ -778,27 +844,44 @@
                     if(controlledPlayer && controlledPlayer.el) controlledPlayer.el.classList.add('controlled');
                 }
 
-                if (keys.ArrowUp) controlledPlayer.y -= playerSpeed;
-                if (keys.ArrowDown) controlledPlayer.y += playerSpeed;
-                if (keys.ArrowLeft) controlledPlayer.x -= playerSpeed;
-                if (keys.ArrowRight) controlledPlayer.x += playerSpeed;
+                let moveX = 0;
+                let moveY = 0;
+                if (keys.ArrowUp) moveY -= 1;
+                if (keys.ArrowDown) moveY += 1;
+                if (keys.ArrowLeft) moveX -= 1;
+                if (keys.ArrowRight) moveX += 1;
+                
+                const magnitude = Math.sqrt(moveX*moveX + moveY*moveY);
+                if (magnitude > 0) {
+                    controlledPlayer.x += (moveX / magnitude) * playerSpeed;
+                    controlledPlayer.y += (moveY / magnitude) * playerSpeed;
+                }
 
                 controlledPlayer.x = Math.max(-8, Math.min(108, controlledPlayer.x));
                 controlledPlayer.y = Math.max(2, Math.min(98, controlledPlayer.y));
                 
                 players.forEach(p => {
-                    if (p === controlledPlayer) return;
+                    if (p === controlledPlayer || p.isFallen) return;
                     const target = ballCarrier || football;
+                    let currentSpeed = playerSpeed;
+
                     if (p.team === kickingTeam.className) {
-                        const angle = Math.atan2(target.y - p.y, target.x - p.x);
-                        p.vx = Math.cos(angle) * (playerSpeed * 0.9);
-                        p.vy = Math.sin(angle) * (playerSpeed * 0.9);
+                        if (p.isBlocked && p.blockTimer > 0) {
+                            p.blockTimer--;
+                            currentSpeed *= 0.1;
+                        } else {
+                            p.isBlocked = false;
+                        }
+                        const pursuitY = target.y + (p.startY - 50) * 0.3;
+                        const angle = Math.atan2(pursuitY - p.y, target.x - p.x);
+                        p.vx = Math.cos(angle) * (currentSpeed * 0.9);
+                        p.vy = Math.sin(angle) * (currentSpeed * 0.9);
                     } else if (p.team === receivingTeam.className) {
-                        const targetX = target.x - 5 - (Math.random() * 5);
-                        const targetY = target.y + (Math.random() * 20 - 10);
+                        const targetX = target.x - 5 - (p.startX - 65);
+                        const targetY = target.y + (p.startY - 50) * 0.5;
                         const angle = Math.atan2(targetY - p.y, targetX - p.x);
-                        p.vx = Math.cos(angle) * (playerSpeed * 0.85);
-                        p.vy = Math.sin(angle) * (playerSpeed * 0.85);
+                        p.vx = Math.cos(angle) * (currentSpeed * 0.85);
+                        p.vy = Math.sin(angle) * (currentSpeed * 0.85);
                     }
                     p.x += p.vx;
                     p.y += p.vy;
@@ -832,18 +915,40 @@
                         cancelAnimationFrame(animationFrameId);
                         return;
                     }
-                    const defenders = players.filter(p => p.team === kickingTeam.className);
+                    const defenders = players.filter(p => p.team === kickingTeam.className && !p.isFallen);
                     for (const defender of defenders) {
                         const dx = ballCarrier.x - defender.x;
                         const dy = ballCarrier.y - defender.y;
                         if (Math.sqrt(dx * dx + dy * dy) < 2) {
-                            gameState = 'playOver';
-                            resetBtn.disabled = false;
-                            cancelAnimationFrame(animationFrameId);
-                            return;
+                            gameState = 'tackle';
+                            tackleState.active = true;
+                            tackleState.defender = defender;
+                            tackleState.mashPower = 0;
+                            tackleState.timer = 60; // 60 frames (1 second) to break
+                            tackleIndicator.style.display = 'block';
+                            tacklePowerMeter.style.display = 'block';
                         }
                     }
                 }
+            }
+        } else if (gameState === 'tackle') {
+            tackleState.timer--;
+            tacklePowerBar.style.width = `${Math.min(100, tackleState.mashPower * 2)}%`;
+            const breakChance = (ballCarrier.attributes.Agility + ballCarrier.attributes.Strength + tackleState.mashPower) / 3;
+            const tackleSuccess = tackleState.defender.attributes.Tackle + (Math.random() * 20);
+
+            if (breakChance > tackleSuccess) {
+                tackleState.defender.isFallen = true;
+                tackleState.defender.el.classList.add('fallen');
+                gameState = 'returnActive';
+                tackleIndicator.style.display = 'none';
+                tacklePowerMeter.style.display = 'none';
+            } else if (tackleState.timer <= 0) {
+                gameState = 'playOver';
+                resetBtn.disabled = false;
+                tackleIndicator.style.display = 'none';
+                tacklePowerMeter.style.display = 'none';
+                cancelAnimationFrame(animationFrameId);
             }
         }
 
@@ -946,6 +1051,11 @@
         if (keys.hasOwnProperty(e.key)) {
             e.preventDefault();
             keys[e.key] = true;
+            if (gameState === 'tackle') {
+                tackleState.mashPower += 2; // Increase power for each key press
+                tackleIndicator.classList.add('pulsing');
+                setTimeout(() => tackleIndicator.classList.remove('pulsing'), 100);
+            }
         }
     });
     window.addEventListener('keyup', (e) => {
